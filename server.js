@@ -385,15 +385,15 @@ function calculateResults() {
         subMessage: `Waiting for ${fakeName} to guess the Secret Word`
       });
     } else {
-      // Fake not caught: award fake +1 (by name)
+      // Fake not caught: award fake +2 (by name)
       const fName = getFakeArtistName();
       if (fName) {
         if (gameState.scores[fName] === undefined) gameState.scores[fName] = 0;
-        gameState.scores[fName] += 1;
-        console.log(`[SERVER DEBUG] Awarded point to fake (by name): ${fName} => ${gameState.scores[fName]}`);
+        gameState.scores[fName] += 2;
+        console.log(`[SERVER DEBUG] Awarded points to fake (by name): ${fName} => ${gameState.scores[fName]}`);
         logScoresContext('after-award-fake-in-calculateResults');
       } else {
-        console.log('[SERVER DEBUG] Unable to determine fake name to award point.');
+        console.log('[SERVER DEBUG] Unable to determine fake name to award points.');
       }
 
       // Immediately check for champion and announce if threshold reached
@@ -422,10 +422,10 @@ function handleFakeGuess(socket, guessText) {
   const fakeName = getFakeArtistName();
 
   if (normalizedGuess && normalizedGuess === normalizedSecret) {
-    // Fake guessed correctly -> fake gets +1
+    // Fake guessed correctly -> fake gets +2
     if (fakeName) {
       if (gameState.scores[fakeName] === undefined) gameState.scores[fakeName] = 0;
-      gameState.scores[fakeName] += 1;
+      gameState.scores[fakeName] += 2;
       console.log(`[SERVER DEBUG] fake guessed correctly: ${fakeName} => ${gameState.scores[fakeName]}`);
       logScoresContext('after-fake-correct-guess');
     }
@@ -468,6 +468,7 @@ function handleFakeGuess(socket, guessText) {
   io.emit('winnerCountdown', {
     winnerType: 'artists',
     winnerNames: awarded,
+    fakeName: fakeName,
     scores: buildScoresById(),
     players: gameState.players
   });
