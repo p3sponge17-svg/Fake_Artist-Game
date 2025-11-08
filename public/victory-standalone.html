@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Victory — Standalone Test</title>
+  <style>
+    :root{
+      --bg:#071017;
+      --panel:#0f1b23;
+      --accent:#00d1a6;
+      --accent-2:#ffd166;
+      --text:#f6fbf9;
+      --muted:rgba(246,251,249,0.7);
+      --glass: rgba(255,255,255,0.04);
+    }
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,var(--bg),#00121a);color:var(--text);font-family:Inter,system-ui,Segoe UI,Roboto,Helvetica,Arial;}
+    .wrap{max-width:1100px;margin:28px auto;padding:20px;display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;}
+    .hero{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:14px; padding:28px; box-shadow: 0 18px 40px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.03);}
+    .title{display:flex;align-items:center;gap:16px;}
+    .trophy{width:84px;height:84px;border-radius:20px;background:linear-gradient(180deg,#ffdf9b,#ffb84d); display:flex;align-items:center;justify-content:center; color:#2b2b00; font-weight:900; font-size:28px; box-shadow:0 10px 30px rgba(0,0,0,0.35)}
+    h1{margin:0;font-size:28px;letter-spacing:-0.02em}
+    .subtitle{color:var(--muted);margin-top:8px}
+    .champion-name{font-size:34px;margin:12px 0 8px 0;color:var(--accent);font-weight:900}
+    .confetti-canvas{position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:9999}
+    .panel{background:var(--panel);border-radius:12px;padding:16px;border:1px solid var(--glass);box-shadow:0 10px 30px rgba(0,0,0,0.5)}
+    .right .panel{position:sticky;top:28px}
+    .leaderboard{margin-top:12px;border-collapse:collapse;width:100%;background:transparent}
+    .leaderboard th{color:var(--muted);text-align:left;padding:8px 10px;font-weight:700;font-size:13px}
+    .leaderboard td{padding:10px;border-top:1px solid rgba(255,255,255,0.02)}
+    .player-row{display:flex;align-items:center;gap:12px}
+    .color-swatch{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,0.4)}
+    .score-badge{margin-left:auto;font-weight:900;background:linear-gradient(180deg,#ffffff08,#ffffff03);padding:6px 10px;border-radius:10px;color:var(--text);font-size:14px}
+    .controls{display:flex;gap:12px;margin-top:18px;flex-wrap:wrap}
+    .btn{padding:10px 14px;border-radius:10px;border:none;cursor:pointer;font-weight:800}
+    .btn-primary{background:linear-gradient(180deg,var(--accent),#008f74);color:#05221d;box-shadow:0 10px 30px rgba(0,0,0,0.35)}
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text)}
+    footer{grid-column:1/-1;margin-top:18px;color:var(--muted);text-align:center;font-size:13px}
+    input, select { padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:var(--text) }
+    .small { font-size:13px; color:var(--muted) }
+    @media (max-width:980px){.wrap{grid-template-columns:1fr;}.right .panel{position:static}}
+  </style>
+</head>
+<body>
+  <canvas id="confetti" class="confetti-canvas"></canvas>
+
+  <main class="wrap">
+    <section class="hero panel" id="heroPanel">
+      <div class="title">
+        <div class="trophy">🏆</div>
+        <div>
+          <h1 id="heroTitle">Stand‑alone Victory Page</h1>
+          <div class="subtitle" id="heroSubtitle">Test the champion screen & score persistence without running the full game.</div>
+        </div>
+      </div>
+
+      <div id="championBox" style="margin-top:18px">
+        <div class="champion-name" id="championName">No champion yet</div>
+        <div id="championDescription" style="color:var(--muted)">Click "Award Win" to simulate a champion — confetti will run when someone reaches the threshold.</div>
+
+        <div class="controls" style="margin-top:12px">
+          <input id="winnerName" placeholder="Winner name (e.g. Neil)" style="min-width:200px">
+          <button id="btnAward" class="btn btn-primary">Award Win</button>
+          <button id="btnReset" class="btn btn-ghost">Reset Scores</button>
+        </div>
+        <div class="small" style="margin-top:10px">This standalone page will try to use a local server API at <code>/api</code>. If unavailable, it falls back to localStorage persistence for quick testing.</div>
+      </div>
+
+      <div id="bigStats" style="margin-top:22px">
+        <h3 style="margin:0 0 8px 0">Scores</h3>
+        <div class="panel" id="scoresPanel" style="padding:12px">
+          <table class="leaderboard" id="scoresTable">
+            <thead><tr><th>Player</th><th style="text-align:right">Score</th></tr></thead>
+            <tbody id="scoresBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <aside class="right">
+      <div class="panel">
+        <h3 style="margin:0 0 8px 0">Controls & Options</h3>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label class="small">Victory threshold:
+            <select id="threshold">
+              <option value="3">3 (quick test)</option>
+              <option value="5" selected>5 (default)</option>
+              <option value="7">7</option>
+            </select>
+          </label>
+          <label class="small">Storage:
+            <select id="storageMode">
+              <option value="api">API (if /api is reachable)</option>
+              <option value="local" selected>Local (localStorage)</option>
+            </select>
+          </label>
+
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="btnDownload" class="btn btn-ghost">Download scores.json</button>
+            <button id="btnClearLocal" class="btn btn-ghost">Clear localStorage</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:12px;">
+        <h3 style="margin:0 0 8px 0">Tips</h3>
+        <div class="small">- To test server mode, run the provided server (server-scores-persist.js) and choose "API" mode.<br>- The Award Win button will POST to /api/win when API mode is selected.</div>
+      </div>
+    </aside>
+  </main>
+
+  <footer>Standalone tester — scores persist across reloads via localStorage or server API.</footer>
+
+<script>
+/* Lightweight confetti engine (same as prior) */
+(function(){
+  const canvas = document.getElementById('confetti');
+  const ctx = canvas.getContext('2d');
+  let W = canvas.width = window.innerWidth;
+  let H = canvas.height = window.innerHeight;
+  let particles = [];
+
+  function rand(min,max){ return Math.random()*(max-min)+min; }
+
+  function spawn(amount=80){
+    particles = [];
+    const colors = ['#ff6b6b','#ffd93d','#4ECDC4','#6A4C93','#00A8E8','#ff69b4','#7CFC00','#ffa500'];
+    for(let i=0;i<amount;i++){
+      particles.push({
+        x: rand(0,W),
+        y: rand(-H*0.5,0),
+        w: rand(6,14),
+        h: rand(8,20),
+        vx: rand(-2,2),
+        vy: rand(2,7),
+        rot: rand(0,360),
+        vrot: rand(-6,6),
+        color: colors[Math.floor(rand(0,colors.length))],
+        ttl: rand(60,160)
+      });
+    }
+  }
+
+  function resize(){ W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+  window.addEventListener('resize', resize);
+
+  function step(){
+    ctx.clearRect(0,0,W,H);
+    for(let p of particles){
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.08; // gravity
+      p.rot += p.vrot;
+      p.ttl--;
+      ctx.save();
+      ctx.translate(p.x,p.y);
+      ctx.rotate(p.rot * Math.PI/180);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);
+      ctx.restore();
+    }
+    particles = particles.filter(p=>p.ttl>0 && p.y < H+100);
+    requestAnimationFrame(step);
+  }
+
+  window.startConfetti = function(duration = 4000){
+    spawn(140);
+    const int = setInterval(()=> spawn(40), 600);
+    setTimeout(()=> clearInterval(int), Math.max(800,duration-1200));
+    setTimeout(()=> spawn(20), duration - 300);
+  };
+  step();
+})();
+
+/* Storage + UI logic:
+   - If storageMode == "api", page calls /api/scores and /api/win (server-scores-persist.js)
+   - If API calls fail, it falls back to localStorage
+*/
+const scoresKey = 'victory_test_scores_v1';
+const winnerInput = document.getElementById('winnerName');
+const btnAward = document.getElementById('btnAward');
+const btnReset = document.getElementById('btnReset');
+const btnDownload = document.getElementById('btnDownload');
+const btnClearLocal = document.getElementById('btnClearLocal');
+const thresholdSelect = document.getElementById('threshold');
+const storageMode = document.getElementById('storageMode');
+
+let scores = {}; // name -> number
+
+async function apiGetScores(){
+  try {
+    const res = await fetch('/api/scores');
+    if (!res.ok) throw new Error('bad');
+    const data = await res.json();
+    return data.scores || {};
+  } catch(e){ throw e; }
+}
+
+async function apiAward(name){
+  try {
+    const res = await fetch('/api/win', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ name }) });
+    if (!res.ok) throw new Error('bad');
+    const data = await res.json();
+    return data.scores || {};
+  } catch(e){ throw e; }
+}
+
+async function apiReset(){
+  try {
+    const res = await fetch('/api/reset', { method:'POST' });
+    if (!res.ok) throw new Error('bad');
+    const data = await res.json();
+    return data.scores || {};
+  } catch(e){ throw e; }
+}
+
+function loadLocal(){
+  const raw = localStorage.getItem(scoresKey);
+  if (!raw) return {};
+  try { return JSON.parse(raw) || {}; } catch(e){ return {}; }
+}
+
+function saveLocal(){
+  localStorage.setItem(scoresKey, JSON.stringify(scores));
+}
+
+function render(){
+  const tbody = document.getElementById('scoresBody');
+  tbody.innerHTML = '';
+  const rows = Object.keys(scores).map(name => ({ name, score: scores[name] || 0 })).sort((a,b)=>b.score-a.score);
+  for (const r of rows){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><div class="player-row"><div class="color-swatch" style="background:${colorFromName(r.name)}"></div><div>${escapeHtml(r.name)}</div></div></td><td style="text-align:right"><span class="score-badge">${r.score}</span></td>`;
+    tbody.appendChild(tr);
+  }
+  // champion display if someone >= threshold
+  const thresh = Number(thresholdSelect.value || 5);
+  const champ = rows.find(r => r.score >= thresh);
+  if (champ){
+    document.getElementById('championName').textContent = champ.name + ' 🏆';
+    document.getElementById('championDescription').textContent = `Reached ${champ.score} points!`;
+    startConfetti(6000);
+  } else {
+    document.getElementById('championName').textContent = 'No champion yet';
+    document.getElementById('championDescription').textContent = 'Award wins to players until someone reaches the threshold.';
+  }
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+function colorFromName(name){
+  // deterministic color picker
+  const palette = ['#FF6B6B','#4ECDC4','#FFD93D','#6A4C93','#00A8E8','#FFA500','#7CFC00','#FF69B4','#a78bfa','#60a5fa'];
+  let h=0;
+  for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) % 997;
+  return palette[h % palette.length];
+}
+
+/* Boot: try to load from API if selected, otherwise local */
+async function boot(){
+  if (storageMode.value === 'api'){
+    try {
+      const api = await apiGetScores();
+      scores = api;
+      saveLocal(); // mirror to local for convenience
+    } catch(e){
+      console.warn('API unreachable, falling back to localStorage');
+      scores = loadLocal();
+      storageMode.value = 'local';
+    }
+  } else {
+    scores = loadLocal();
+  }
+  render();
+}
+boot();
+
+/* Award button handler */
+btnAward.addEventListener('click', async ()=>{
+  const name = (winnerInput.value || '').trim();
+  if (!name) { alert('Enter a winner name'); return; }
+
+  if (storageMode.value === 'api'){
+    try {
+      const apiScores = await apiAward(name);
+      scores = apiScores;
+      saveLocal();
+      render();
+      winnerInput.value = '';
+      return;
+    } catch(e){
+      alert('API failed — switching to local mode');
+      storageMode.value = 'local';
+    }
+  }
+
+  // local mode
+  scores[name] = (scores[name]||0) + 1;
+  saveLocal();
+  render();
+  winnerInput.value = '';
+});
+
+/* Reset button handler */
+btnReset.addEventListener('click', async ()=>{
+  if (!confirm('Reset all scores?')) return;
+  if (storageMode.value === 'api'){
+    try {
+      const apiScores = await apiReset();
+      scores = apiScores;
+      saveLocal();
+      render();
+      return;
+    } catch(e){
+      alert('API reset failed — switching to local mode');
+      storageMode.value = 'local';
+    }
+  }
+  scores = {};
+  saveLocal();
+  render();
+});
+
+/* Download scores.json button (client-side) */
+btnDownload.addEventListener('click', ()=> {
+  const blob = new Blob([JSON.stringify(scores, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'scores.json'; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+});
+
+/* Clear local storage */
+btnClearLocal.addEventListener('click', ()=> {
+  if (!confirm('Clear localStorage scores?')) return;
+  localStorage.removeItem(scoresKey);
+  scores = {};
+  render();
+});
+
+/* storage mode change: try API if selected */
+storageMode.addEventListener('change', async ()=>{
+  if (storageMode.value === 'api'){
+    try {
+      const api = await apiGetScores();
+      scores = api;
+      saveLocal();
+      render();
+    } catch(e){
+      alert('API not reachable. Using local mode.');
+      storageMode.value = 'local';
+    }
+  } else {
+    scores = loadLocal();
+    render();
+  }
+});
+
+/* fallback keyboard: Enter in input triggers award */
+winnerInput.addEventListener('keydown', (e)=> {
+  if (e.key === 'Enter') btnAward.click();
+});
+
+function startConfetti(duration){ window.startConfetti && window.startConfetti(duration); }
+</script>
+</body>
+</html>

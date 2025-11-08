@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A FAKE ARTIST GOES TO NEW YORK</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>A FAKE ARTIST GOES TO NEW YORK</h1>
+            <p class="subtitle">A drawing and deduction party game</p>
+        </div>
+        
+        <div class="login-form">
+            <h2>Join the Game</h2>
+            <div class="input-group">
+                <input type="text" id="playerName" placeholder="Enter your name" maxlength="20" autofocus>
+                <button id="joinGame">Join Game</button>
+            </div>
+        </div>
+        
+        <div class="instructions">
+            <h2>How to Play:</h2>
+            <div class="instruction-cards">
+                <div class="card">
+                    <h3>🎭 Roles</h3>
+                    <p>One player is the <strong>Fake Artist</strong> who doesn't know the secret word. All others are <strong>Real Artists</strong> who know the word.</p>
+                </div>
+                <div class="card">
+                    <h3>✏️ Drawing</h3>
+                    <p>Take turns drawing <strong>one continuous line</strong> each. Two rounds total.</p>
+                </div>
+                <div class="card">
+                    <h3>🗳️ Voting</h3>
+                    <p>After drawing, vote for who you think is the Fake Artist.</p>
+                </div>
+                <div class="card">
+                    <h3>🏆 Scoring</h3>
+                    <p>If the Fake Artist is caught but guesses the word, they win! Otherwise, Real Artists win. First to 5 points wins the game.</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="requirements">
+            <p>🎯 <strong>Requirements:</strong> 3-8 players • 5-15 minutes</p>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        
+        document.getElementById('joinGame').addEventListener('click', joinGame);
+        document.getElementById('playerName').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') joinGame();
+        });
+
+        function joinGame() {
+            const playerName = document.getElementById('playerName').value.trim();
+            if (playerName) {
+                document.getElementById('joinGame').disabled = true;
+                document.getElementById('joinGame').textContent = 'Joining...';
+                localStorage.setItem('playerName', playerName);
+                socket.emit('joinGame', playerName);
+            } else {
+                alert('Please enter your name');
+            }
+        }
+
+        socket.on('playerAssigned', (data) => {
+            localStorage.setItem('playerData', JSON.stringify(data));
+            window.location.href = '/lobby';
+        });
+
+        socket.on('error', (message) => {
+            alert('❌ Error: ' + message);
+            document.getElementById('joinGame').disabled = false;
+            document.getElementById('joinGame').textContent = 'Join Game';
+        });
+    </script>
+</body>
+</html>

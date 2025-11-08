@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Results - Fake Artist</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { background:#000; color:#fff; font-family: Arial, Helvetica, sans-serif; }
+    .container { max-width:900px; margin:2rem auto; padding:1rem; }
+    .header h1 { margin:0 0 1rem 0; }
+    .result-card, .winner-card { background:#111; padding:1rem; border-radius:8px; margin-bottom:1rem; }
+    .scores-list { display:flex; flex-direction:column; gap:0.5rem; margin-top:0.5rem; }
+    .score-item { display:flex; align-items:center; gap:0.75rem; padding:0.5rem; background:#0b0b0b; border-radius:6px; }
+    .player-color { width:18px; height:18px; border-radius:4px; display:inline-block; }
+    .player-name { font-weight:bold; color:#fff; }
+    .score { margin-left:auto; color:#fff; }
+    .hidden { display:none; }
+    .round-winners { margin-top:0.5rem; font-weight:bold; color:#ffd; }
+    .secret-word-reveal { margin:0.5rem 0; color:#ddd; }
+    button { background:#222; color:#fff; border:1px solid #333; padding:0.6rem 1rem; border-radius:6px; cursor:pointer; }
+    /* Countdown overlay */
+    #endCountdownOverlay {
+      display:none;
+      position:fixed; inset:0;
+      background: rgba(0,0,0,0.85);
+      z-index:9999;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      color:#fff;
+      text-align:center;
+      padding:20px;
+    }
+    #countdownCircle { font-size:72px; font-weight:900; margin:12px 0; color:#ffd; }
+    /* small "confetti safe" area padding to not overlap modal actions */
+    #endCountdownOverlay .content { max-width:640px; padding:18px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="resultsContent">
+      <div class="header">
+        <h1>📊 Round Results</h1>
+      </div>
+
+      <div id="resultsInfo" class="result-card">
+        <!-- Voting results (fake artist caught/not) will populate here -->
+        <h2>Awaiting results...</h2>
+      </div>
+
+      <div id="scoresDisplay" class="result-card">
+        <h3>📈 Current Scores</h3>
+        <div id="scoresList" class="scores-list"></div>
+      </div>
+
+      <div style="margin-top:1rem">
+        <button id="nextRoundButton" class="hidden">Next Round</button>
+      </div>
+    </div>
+
+    <div id="gameOverContent" class="hidden">
+      <div class="header">
+        <h1>🏆 Game Over!</h1>
+      </div>
+
+      <div id="winnerInfo" class="winner-card"></div>
+
+      <div id="finalScores" class="result-card"></div>
+
+      <div style="margin-top:1rem">
+        <button id="playAgainButton">Play Again</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Countdown overlay: shown on victory and then redirect to /champions -->
+  <div id="endCountdownOverlay">
+    <div class="content">
+      <div style="font-size:24px; font-weight:800;">Champion(s) crowned!</div>
+      <div id="countdownCircle">15</div>
+      <div style="margin-top:8px; color:#ddd;">Redirecting to Champions page in <span id="countdownText">15</span> seconds</div>
+      <div style="margin-top:16px;">
+        <button id="skipCountdownBtn">Go Now</button>
+      </div>
+    </div>
+  </div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/confetti.js"></script>
+<script>
+  const socket = io();
+  let latestPlayers = {};
+  let latestScores = {};
+  let countdownTimer = null;
+  let countdownSeconds = 15;
+
+  function normalizeName(n){ return (typeof n === 'string' ? n.trim() : ''); }
+
+  function getPlayerScore(player, scores) {
+    if (!scores || !player) return 0;
+    if (scores[player.id] !== undefined) return scores[player.id];
+    if (scores[player.name] !== undefined) return scores[player.name];
+    const norm = normalizeName(player.name);
+    if (scores[norm] !== undefined) return scores[norm];
+    return 0;
+  }
+
+  function renderScores(players, scores, containerId = 'scoresList') {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    if (!players || !scores) {
+      container.innerHTML = '<div style="color:#ccc">No scores yet.</div>';
+      return;
+    }
+    let playerArray = Array.isArray(players) ? players.slice() : Object.values(players || {});
+    const rows = playerArray.map(p => ({ player: p, score: getPlayerScore(p, scores) }));
+    rows.sort((a,b) => b.score - a.score);
+    if (rows.length === 0) {
+      container.innerHTML = '<div style="color:#ccc">No players to show.</div>';
+      return;
+    }
+    for (const r of rows) {
+      const p = r.player;
+      const score = r.score || 0;
+      const el = document.createElement('div');
+      el.className = 'score-item';
+      el.innerHTML = `<span class="player-color" style="background:${p.color || '#999'}"></span>
+                      <span class="player-name">${p.name}</span>
+                      <span class="score">${score} pts</span>`;
+      container.appendChild(el);
+    }
+  }
+
+  // Handle voting results display
+  socket.on('votingResults', (data) => {
+    latestPlayers = data.players || latestPlayers;
+    const accusedName =
+      data.accusedPlayerName ||
+      (data.accusedPlayer ? (data.players && data.players[data.accusedPlayer] && data.players[data.accusedPlayer].name) : "(?)");
+
+    const fakeName = data.fakeArtistName || (data.players && data.players[data.fakeArtist] && data.players[data.fakeArtist].name) || '(?)';
+    const caught = !!data.fakeArtistCaught;
+
+    const info = document.getElementById('resultsInfo');
+    info.innerHTML = `
+      <div>
+        <h2>🎯 Vote Result</h2>
+        <p class="secret-word-reveal">Accused: <strong>${accusedName}</strong></p>
+        <p class="fake-artist-reveal">Fake Artist: <strong>${fakeName}</strong></p>
+        <div class="voting-outcome ${caught ? 'success' : 'failure'}">
+          <h3>${caught ? '✅ The Fake Artist was caught!' : '❌ The Fake Artist was not caught!'}</h3>
+        </div>
+      </div>
+    `;
+    if (data.scores) {
+      latestScores = data.scores;
+      renderScores(data.players || latestPlayers, data.scores);
+    }
+  });
+
+  socket.on('winnerCountdown', (data) => {
+    latestPlayers = data.players || latestPlayers;
+    latestScores = data.scores || latestScores;
+    let winnerLine = "";
+    if (data.winnerType === "artists" && Array.isArray(data.winnerNames)) {
+      winnerLine = `<div class="round-winners"><b>Winners:</b> <span style="font-weight:bold">${data.winnerNames.join(", ")}</span></div>`;
+    } else if (data.winnerType === "fake") {
+      const fake = data.fakeName || data.fakeArtist || '(?)';
+      winnerLine = `<div class="round-winners"><b>Fake Artist Wins:</b> <span style="font-weight:bold">${fake}</span></div>`;
+    } else {
+      winnerLine = `<div class="round-winners"><b>Winners:</b> real artists</div>`;
+    }
+    const info = document.getElementById('resultsInfo');
+    info.innerHTML += `<div class="winner-result">${winnerLine}</div>`;
+    renderScores(latestPlayers, latestScores);
+    document.getElementById('nextRoundButton').classList.remove('hidden');
+  });
+
+  socket.on('winnerSteal', (data) => {
+    latestPlayers = data.players || latestPlayers;
+    latestScores = data.scores || latestScores;
+    const info = document.getElementById('resultsInfo');
+    info.innerHTML += `<div class="winner-result"><b>${data.fakeName}</b> STEALS THE VICTORY! 1 Point!</div>`;
+    renderScores(latestPlayers, latestScores);
+    document.getElementById('nextRoundButton').classList.remove('hidden');
+  });
+
+  socket.on('scoresUpdated', (data) => {
+    latestPlayers = data.players || latestPlayers;
+    latestScores = data.scores || latestScores;
+    renderScores(latestPlayers, latestScores);
+    console.log('[CLIENT] scoresUpdated', data);
+  });
+
+  // Victory (game over) -> show overlay + confetti + sound
+  socket.on('victory', (data) => {
+    latestPlayers = data.players || latestPlayers;
+    latestScores = data.scores || latestScores;
+
+    document.getElementById('resultsContent').classList.add('hidden');
+    document.getElementById('gameOverContent').classList.remove('hidden');
+
+    const champs = data.champions || [];
+    const winnerInfo = document.getElementById('winnerInfo');
+    winnerInfo.innerHTML = `
+      <div class="winner-card">
+        <h2>🎉 Champion!</h2>
+        <h3 style="margin:0">${champs.join(', ')}</h3>
+        <p>First to reach 5 points</p>
+      </div>
+    `;
+    renderScores(latestPlayers, latestScores, 'finalScores');
+
+    // Play confetti + sound for celebration
+    if (window.startConfetti) startConfetti(9000, { audioSrc: '/assets/victory-sound.mp3', volume: 0.7 });
+
+    // Start the 15 second countdown and show overlay
+    showEndCountdownOverlay(champs, data);
+  });
+
+  function showEndCountdownOverlay(champions, data) {
+    const overlay = document.getElementById('endCountdownOverlay');
+    const circle = document.getElementById('countdownCircle');
+    const text = document.getElementById('countdownText');
+    overlay.style.display = 'flex';
+    countdownSeconds = 15;
+    circle.textContent = String(countdownSeconds);
+    text.textContent = String(countdownSeconds);
+
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(() => {
+      countdownSeconds--;
+      circle.textContent = String(countdownSeconds);
+      text.textContent = String(countdownSeconds);
+      if (countdownSeconds <= 0) {
+        clearInterval(countdownTimer);
+        if (window.stopConfetti) stopConfetti();
+        window.location.href = '/champions';
+      }
+    }, 1000);
+  }
+
+  document.getElementById('skipCountdownBtn').addEventListener('click', () => {
+    if (countdownTimer) clearInterval(countdownTimer);
+    if (window.stopConfetti) stopConfetti();
+    window.location.href = '/champions';
+  });
+
+  document.getElementById('nextRoundButton').addEventListener('click', () => {
+    socket.emit('newRound');
+    document.getElementById('nextRoundButton').classList.add('hidden');
+  });
+  document.getElementById('playAgainButton').addEventListener('click', () => {
+    socket.emit('newRound');
+  });
+
+  socket.on('returnToLobby', () => {
+    if (window.stopConfetti) stopConfetti();
+    window.location.href = '/lobby';
+  });
+
+  socket.on('updatePlayers', (players) => {
+    latestPlayers = Array.isArray(players) ? Object.fromEntries(players.map(p => [p.id, p])) : (players || latestPlayers);
+  });
+
+  // request snapshot if available
+  socket.emit('requestVotingState');
+</script>
+</body>
+</html>

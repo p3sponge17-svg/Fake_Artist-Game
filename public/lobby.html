@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Lobby - Fake Artist</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { background:#000; color:#fff; font-family: Arial, Helvetica, sans-serif; }
+    .container { max-width:900px; margin:2rem auto; padding:1rem; }
+    .player-list { margin-top:1rem; display:flex; flex-direction:column; gap:0.5rem; }
+    .player-item { display:flex; align-items:center; gap:0.75rem; padding:0.6rem; background:#111; border-radius:6px; }
+    .ready-indicator { margin-left:auto; font-weight:bold; color:#ffd; }
+    #startButton { margin-top:1rem; padding:0.6rem 1rem; font-size:16px; border-radius:8px; cursor:pointer; background:#0a84ff; color:#fff; border:none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Lobby</h1>
+    <div id="players" class="player-list"></div>
+    <button id="startButton">Start Game</button>
+  </div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const socket = io();
+  let myPlayerId = null;
+  let myName = localStorage.getItem('playerName') || '';
+
+  function renderPlayers(players, lobbyReadySet) {
+    const container = document.getElementById('players');
+    container.innerHTML = '';
+    Object.values(players || {}).forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'player-item';
+      div.id = `player-${p.id}`;
+      div.innerHTML = `<span style="width:12px;height:12px;background:${p.color};display:inline-block;border-radius:3px"></span>
+                       <span class="player-name">${p.name}</span>
+                       <span class="ready-indicator">${lobbyReadySet && lobbyReadySet.has(p.id) ? 'Waiting...' : ''}</span>`;
+      container.appendChild(div);
+    });
+  }
+
+  document.getElementById('startButton').addEventListener('click', () => {
+    if (!myName) {
+      alert('Please enter your player name on the main page first.');
+      return;
+    }
+    socket.emit('startGame');
+    // Optimistically update local button UI
+    document.getElementById('startButton').textContent = 'Waiting...';
+    document.getElementById('startButton').disabled = true;
+  });
+
+  socket.on('connect', () => {
+    if (myName) socket.emit('joinGame', myName);
+    // request lobby state so UI can sync
+    socket.emit('requestVotingState');
+  });
+
+  socket.on('playerAssigned', (data) => {
+    myPlayerId = data.playerId;
+    myName = data.playerName;
+  });
+
+  // Keep UI synced: show which players are waiting (lobby ready)
+  socket.on('lobbyReadyUpdate', (data) => {
+    const readySet = new Set(data.lobbyReadies || []);
+    // update the Start button state for the local player
+    const isMeReady = readySet.has(myPlayerId);
+    const startBtn = document.getElementById('startButton');
+    if (isMeReady) {
+      startBtn.textContent = 'Waiting...';
+      startBtn.disabled = true;
+    } else {
+      startBtn.textContent = 'Start Game';
+      startBtn.disabled = false;
+    }
+    renderPlayers(data.players || {}, readySet);
+  });
+
+  // keep players list updated on join/leave
+  socket.on('updatePlayers', (players) => {
+    // Convert to map for renderPlayers
+    const map = Object.fromEntries((players || []).map(p => [p.id, p]));
+    // If we don't have a lobbyReadyUpdate snapshot at this moment, pass empty set
+    renderPlayers(map, new Set());
+  });
+
+  // On start, the server will emit startDrawing/roleAssigned; navigate to /game
+  socket.on('startDrawing', (data) => {
+    // go to drawing page
+    window.location.href = '/game';
+  });
+
+  // helpful debug
+  socket.on('enableStartButton', (enabled) => {
+    document.getElementById('startButton').disabled = !enabled;
+  });
+</script>
+</body>
+</html>

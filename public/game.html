@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A FAKE ARTIST GOES TO NEW YORK</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container game-container">
+        <!-- Role Assignment & Reveal -->
+        <div id="roleScreen" class="screen">
+            <div id="revealRoleSection">
+                <h1 class="role-title">YOUR ROLE</h1>
+                <button id="revealRoleButton" class="reveal-role-button">Reveal Your Role</button>
+            </div>
+            <div id="roleContentSection" style="display: none;">
+                <div class="role-content">
+                    <h1 id="roleTitle" class="role-title">Your Role</h1>
+                    <div id="roleInfo" class="role-info"></div>
+                    <button id="readyButton" class="ready-button">I'm Ready!</button>
+                    <div id="readyStatus" class="ready-status">
+                        <p>Waiting for other players to ready up...</p>
+                        <div id="readyPlayersList"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Drawing/Turn screen -->
+        <div id="drawingScreen" class="screen hidden">
+            <div class="game-header">
+                <div class="game-info">
+                    <h2>Round: <span id="currentRound">1</span>/2</h2>
+                    <p class="category">Category: <strong id="categoryDisplay">Loading...</strong></p>
+                    <p id="secretWordInfo" class="secret-word"></p>
+                </div>
+                <div class="turn-info">
+                    <p id="turnInfo" class="turn-message">Waiting for game to start...</p>
+                </div>
+            </div>
+            <div class="whiteboard-container">
+                <canvas id="whiteboard" width="800" height="500"></canvas>
+                <div class="whiteboard-overlay" id="whiteboardOverlay">
+                    <p>Wait for your turn to draw...</p>
+                </div>
+            </div>
+            <div class="players-display">
+                <h3>Players:</h3>
+                <div id="playersStatus" class="players-status"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const canvas = document.getElementById('whiteboard');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('whiteboardOverlay');
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let currentPlayerColor = '';
+        let isMyTurn = false;
+        let amIFakeArtist = false;
+        let players = {};
+        let secretWord = '';
+        let gotRole = false;
+
+        // Try to re-join if name saved (helps when navigating between pages)
+        const savedPlayerName = localStorage.getItem('playerName');
+        if (savedPlayerName) {
+            socket.emit('joinGame', savedPlayerName);
+        }
+
+        // Helper to update category + secret word UI in a defensive way
+        function updateCategoryAndSecretUI(categoryFromEvent, secretFromEvent) {
+            if (categoryFromEvent !== undefined && categoryFromEvent !== null) {
+                document.getElementById('categoryDisplay').textContent = categoryFromEvent;
+            }
+            const secretEl = document.getElementById('secretWordInfo');
+            if (!amIFakeArtist) {
+                const s = (secretFromEvent !== undefined && secretFromEvent !== null) ? secretFromEvent : secretWord;
+                if (s) {
+                    secretEl.textContent = `Secret Word: ${s}`;
+                    secretEl.className = 'secret-word known';
+                }
+            } else {
+                secretEl.textContent = 'You are the Fake Artist! Try to blend in.';
+                secretEl.className = 'secret-word fake';
+            }
+        }
+
+        // 1. Prompt for role reveal after game start
+        socket.on('promptRevealRole', () => {
+            document.getElementById('roleScreen').classList.remove('hidden');
+            document.getElementById('drawingScreen').classList.add('hidden');
+            document.getElementById('revealRoleSection').style.display = '';
+            document.getElementById('roleContentSection').style.display = 'none';
+        });
+
+        // 2. On clicking "Reveal Your Role", send readyToSeeRole
+        document.getElementById('revealRoleButton').addEventListener('click', function() {
+            socket.emit('readyToSeeRole');
+            document.getElementById('revealRoleSection').style.display = 'none';
+            document.getElementById('roleContentSection').style.display = '';
+        });
+
+        // 3. Only after 'roleAssigned' show the player's role details
+        socket.on('roleAssigned', (data) => {
+            gotRole = true;
+            amIFakeArtist = (data.role === 'fake');
+            if (data.role === 'fake') {
+                secretWord = '';
+            } else {
+                secretWord = data.secretWord || '';
+            }
+
+            document.getElementById('roleScreen').classList.remove('hidden');
+            document.getElementById('drawingScreen').classList.add('hidden');
+            document.getElementById('roleContentSection').style.display = '';
+
+            const roleTitle = document.getElementById('roleTitle');
+            const roleInfo = document.getElementById('roleInfo');
+
+            if (data.role === 'fake') {
+                roleTitle.textContent = '🎭 YOU ARE THE FAKE';
+                roleTitle.className = 'role-title fake-artist';
+                roleInfo.innerHTML = `
+                    <div class="role-card fake">
+                        <h3>Your Mission:</h3>
+                        <p>Category: <strong>${data.category || '—'}</strong></p>
+                        <p>You don't know the secret word! Try to blend in with the real artists.</p>
+                        <p>If you're caught but guess the word correctly, you steal the victory!</p>
+                        <div class="tips">
+                            <strong>Tips:</strong>
+                            <ul>
+                                <li>Watch what others draw carefully</li>
+                                <li>Make your lines look intentional</li>
+                                <li>Don't make it too obvious you're guessing</li>
+                            </ul>
+                        </div>
+
+                        <div class="scoring" style="margin-top:12px;background:transparent;padding:8px;border-radius:6px;">
+                          <h4 style="margin:0 0 8px 0">Scoring</h4>
+                          <p style="margin:0 0 6px 0;">
+                            As the Fake Artist you can win <strong>2 points</strong> in two ways:
+                          </p>
+                          <ol style="margin:0 0 8px 22px;">
+                            <li>If the Fake Artist is <em>not</em> caught by a majority of Real Artists, the Fake Artist wins <strong>2 points</strong>.</li>
+                            <li>If the Fake Artist <em>is</em> caught but then guesses the secret word correctly, the Fake Artist also wins <strong>2 points</strong>.</li>
+                          </ol>
+                          <p style="margin:0;color:#ffd; font-weight:700;">First player to 5 points is crowned <em>The Champion</em>.</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                roleTitle.textContent = '🎨 YOU ARE A REAL ARTIST';
+                roleTitle.className = 'role-title real-artist';
+                roleInfo.innerHTML = `
+                    <div class="role-card real">
+                        <h3>Your Mission:</h3>
+                        <p>Category: <strong>${data.category || '—'}</strong></p>
+                        <p>Secret Word: <strong class="secret-word-display">${data.secretWord || '—'}</strong></p>
+                        <p>Help draw the word without making it too obvious for the fake artist!</p>
+                        <div class="tips">
+                            <strong>Tips:</strong>
+                            <ul>
+                                <li>Draw clear but not too obvious lines</li>
+                                <li>Watch for suspicious drawing behavior</li>
+                                <li>Help identify the fake artist</li>
+                            </ul>
+                        </div>
+
+                        <div class="scoring" style="margin-top:12px;background:transparent;padding:8px;border-radius:6px;">
+                          <h4 style="margin:0 0 8px 0">Scoring</h4>
+                          <p style="margin:0 0 6px 0;">
+                            As a Real Artist, if the group correctly catches the Fake Artist by majority vote, all Real Artists each win <strong>1 point</strong>.
+                          </p>
+                          <p style="margin:0;color:#ffd; font-weight:700;">First player to 5 points is crowned <em>The Champion</em>.</p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Ensure the drawing UI has the correct category/secret immediately after roleAssigned
+            updateCategoryAndSecretUI(data.category, data.secretWord);
+        });
+
+        document.getElementById('readyButton').addEventListener('click', () => {
+            socket.emit('playerReady');
+            document.getElementById('readyButton').disabled = true;
+            document.getElementById('readyButton').textContent = 'Waiting for others...';
+        });
+
+        socket.on('playerReadyUpdate', (data) => {
+            const readyPlayersList = document.getElementById('readyPlayersList');
+            let readyHtml = '';
+            Object.values(data.players).forEach(player => {
+                readyHtml += `
+                    <div class="ready-player">
+                        <span class="player-color" style="background-color: ${player.color}"></span>
+                        ${player.name} ${player.ready ? '✅' : '⏳'}
+                    </div>
+                `;
+            });
+            readyPlayersList.innerHTML = readyHtml;
+        });
+
+        // Transition to drawing after all are ready
+        socket.on('startDrawing', (data) => {
+            document.getElementById('roleScreen').classList.add('hidden');
+            document.getElementById('drawingScreen').classList.remove('hidden');
+
+            updateCategoryAndSecretUI(data && data.category, data && data.secretWord);
+
+            redrawAllLines(data.drawing || []);
+        });
+
+        socket.on('roundStarted', (data) => {
+            document.getElementById('currentRound').textContent = data.round;
+            redrawAllLines(data.drawing || []);
+            updateTurnInfo(data.currentTurn);
+            updatePlayersStatus(data.players);
+            updateCategoryAndSecretUI(data.category, data.secretWord);
+        });
+
+        socket.on('turnChanged', (data) => {
+            updateTurnInfo(data.currentTurn);
+        });
+
+        socket.on('gameStarted', (data) => {
+            if (!data.players[socket.id] && savedPlayerName) {
+                socket.emit('joinGame', savedPlayerName);
+            }
+            players = data.players;
+            currentPlayerColor = players[socket.id] ? players[socket.id].color : "#000";
+            if (data.category || data.secretWord) {
+                if (!amIFakeArtist && (data.secretWord !== undefined)) {
+                    secretWord = data.secretWord;
+                }
+                updateCategoryAndSecretUI(data.category, data.secretWord);
+            } else {
+                updateCategoryAndSecretUI(null, null);
+            }
+            updatePlayersStatus(players);
+        });
+
+        // Drawing events (local)
+        canvas.addEventListener('mousedown', startDrawing);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDrawing);
+        canvas.addEventListener('mouseout', stopDrawing);
+        canvas.addEventListener('touchstart', handleTouchStart);
+        canvas.addEventListener('touchmove', handleTouchMove);
+        canvas.addEventListener('touchend', stopDrawing);
+
+        function handleTouchStart(e) {
+            e.preventDefault();
+            if (!isMyTurn) return;
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            startDrawing({ offsetX: x, offsetY: y });
+        }
+        function handleTouchMove(e) {
+            e.preventDefault();
+            if (!isDrawing || !isMyTurn) return;
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            draw({ offsetX: x, offsetY: y });
+        }
+
+        function startDrawing(e) {
+            if (!isMyTurn) return;
+            isDrawing = true;
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+            socket.emit('drawStart', { x: lastX, y: lastY });
+        }
+
+        function draw(e) {
+            if (!isDrawing || !isMyTurn) return;
+            ctx.strokeStyle = currentPlayerColor;
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(e.offsetX, e.offsetY);
+            ctx.stroke();
+            socket.emit('drawMove', { x: e.offsetX, y: e.offsetY });
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+        }
+
+        function stopDrawing() {
+            if (!isDrawing || !isMyTurn) return;
+            isDrawing = false;
+            socket.emit('drawEnd');
+        }
+
+        socket.on('drawStart', (data) => {
+            ctx.strokeStyle = data.color;
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(data.x, data.y);
+        });
+
+        socket.on('drawMove', (data) => {
+            ctx.strokeStyle = data.color;
+            ctx.lineTo(data.x, data.y);
+            ctx.stroke();
+        });
+
+        function updateTurnInfo(turnPlayerId) {
+            const turnInfo = document.getElementById('turnInfo');
+            isMyTurn = turnPlayerId === socket.id;
+            if (isMyTurn) {
+                turnInfo.textContent = '🎨 Your turn! Draw one continuous line.';
+                turnInfo.className = 'turn-message your-turn';
+                overlay.style.display = 'none';
+                canvas.style.cursor = 'crosshair';
+            } else {
+                const currentPlayer = players[turnPlayerId];
+                turnInfo.textContent = `Waiting for ${currentPlayer ? currentPlayer.name : 'another player'} to draw...`;
+                turnInfo.className = 'turn-message';
+                overlay.style.display = 'flex';
+                canvas.style.cursor = 'default';
+            }
+        }
+
+        function updatePlayersStatus(playersData) {
+            const playersStatus = document.getElementById('playersStatus');
+            playersStatus.innerHTML = '';
+            Object.values(playersData).forEach(player => {
+                const playerElement = document.createElement('div');
+                playerElement.className = `player-status ${player.id === socket.id ? 'you' : ''}`;
+                playerElement.innerHTML = `
+                    <span class="player-color" style="background-color: ${player.color}"></span>
+                    <span class="player-name">${player.name} ${player.id === socket.id ? '(You)' : ''}</span>
+                `;
+                playersStatus.appendChild(playerElement);
+            });
+        }
+
+        // New: redraw all prior drawing lines (array of {type, color, points})
+        function redrawAllLines(drawing) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            drawing.forEach(line => {
+                ctx.strokeStyle = line.color || "#000";
+                ctx.lineWidth = 4;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.beginPath();
+                if (line.points && line.points.length > 0) {
+                    ctx.moveTo(line.points[0].x, line.points[0].y);
+                    for (let i = 1; i < line.points.length; i++) {
+                        ctx.lineTo(line.points[i].x, line.points[i].y);
+                    }
+                    ctx.stroke();
+                }
+            });
+        }
+
+        socket.on('startVoting', (data) => {
+            window.localStorage.setItem('currentDrawing', JSON.stringify(data.drawing || []));
+            window.location.href = '/voting';
+        });
+    </script>
+</body>
+</html>

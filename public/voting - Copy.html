@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Voting - A FAKE ARTIST GOES TO NEW YORK</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body { background: #000; color: #fff; font-family: Inter, Arial, sans-serif; }
+        #winnerModal, #guessModal {
+            display: none;
+            position: fixed; left:0; right:0; top:0; bottom:0;
+            background:rgba(0,0,0,0.75); color:white; z-index:30;
+            justify-content: center; align-items: center; flex-direction:column;
+        }
+        #winnerModal .content, #guessModal .content {
+            background: #222;
+            border-radius: 1rem;
+            padding: 1.5rem 2rem;
+            text-align: center;
+            min-width: 320px;
+            max-width: 860px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+        }
+        .leaderboard { margin-top:1rem; }
+        .leaderboard table { width:100%; border-collapse:collapse;background:#fff;color:#000;}
+        .leaderboard th,.leaderboard td{padding:0.4rem 1rem;}
+        .vote-button { border: none; border-radius:8px; cursor:pointer; font-weight:bold; }
+        .next-button {
+            margin-top:12px;
+            padding: 10px 16px;
+            border-radius: 10px;
+            font-weight: 800;
+            background: linear-gradient(180deg,#0a84ff,#0066cc);
+            color: #fff;
+            border: none;
+            cursor: pointer;
+        }
+        .next-button[disabled] { opacity:0.6; cursor: default; }
+        .ready-status { margin-top: 10px; color: #ddd; font-weight:700; }
+
+        /* Countdown overlay (new) */
+        #victoryCountdownOverlay {
+          display: none;
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.9);
+          z-index: 99999;
+          color: white;
+          align-items: center;
+          justify-content: center;
+          flex-direction: column;
+          text-align:center;
+          padding: 20px;
+        }
+        #victoryCountdownNumber {
+          font-size: 84px;
+          font-weight: 900;
+          color: #ffd;
+          margin: 10px 0;
+        }
+        #victoryCountdownText { color: #ddd; margin-top:6px; }
+
+        /* VOTE NOW Banner */
+        #voteNowBanner {
+          position: fixed;
+          top: 14px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 99998;
+          background: linear-gradient(90deg,#ff6b6b,#ffd66b);
+          color: #111;
+          padding: 12px 22px;
+          border-radius: 999px;
+          font-size: 18px;
+          font-weight: 900;
+          box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+          display: none;
+          letter-spacing: 0.06em;
+          animation: pulse 1.15s infinite;
+        }
+        @keyframes pulse {
+          0% { transform: translateX(-50%) scale(1); }
+          50% { transform: translateX(-50%) scale(1.05); }
+          100% { transform: translateX(-50%) scale(1); }
+        }
+        .vote-button.selected {
+          outline: 4px solid rgba(255,255,255,0.12);
+          transform: translateY(-3px);
+          box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .vote-area { margin-top: 18px; }
+    </style>
+</head>
+<body>
+<div class="container voting-container">
+    <h1>Vote: Who is the Fake Artist?</h1>
+
+    <!-- prominent vote-now indicator -->
+    <div id="voteNowBanner" role="status" aria-live="polite">VOTE NOW — Click a player to cast your vote</div>
+
+    <div id="drawingWrapper"></div>
+    <div id="voteArea" class="vote-area"></div>
+    <div id="votingStatus"></div>
+</div>
+
+<!-- Winner modal with unanimous-start UI -->
+<div id="winnerModal">
+    <div class="content">
+        <div id="winnerMessage" style="font-size:1.4rem; font-weight:800;"></div>
+        <div id="winnerExtra" style="margin-top:0.5rem;"></div>
+
+        <!-- Readiness area: everyone clicks; UI shows how many have clicked -->
+        <div class="ready-status" id="readyStatus">0 / 0 players ready</div>
+        <div style="margin-top:1rem;">
+            <button id="startNextGameBtn" class="next-button">I'm Ready — Start Next Game</button>
+        </div>
+    </div>
+</div>
+
+<!-- Guess modal remains the same -->
+<div id="guessModal">
+    <div class="content">
+        <h2>You've Been Caught!</h2>
+        <p>Guess the secret word in category <span id="guessCategory"></span>:</p>
+        <input type="text" id="guessInput" style="padding:0.5em;font-size:1.1em;width:80%;max-width:320px;">
+        <br><button id="guessBtn" style="margin-top:1em;font-size:1.05em;padding:0.5em 2em;">Guess</button>
+    </div>
+</div>
+
+<!-- Countdown overlay that appears on final victory and redirects to /champions -->
+<div id="victoryCountdownOverlay">
+  <div style="font-size:22px; font-weight:800;">Champion(s) crowned!</div>
+  <div id="victoryCountdownNumber">15</div>
+  <div id="victoryCountdownText">Redirecting to Champions page in <span id="victoryCountdownTextSeconds">15</span> seconds</div>
+  <div style="margin-top:16px;">
+    <button id="victoryGoNowBtn" class="next-button">Go Now</button>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/confetti.js"></script>
+<script>
+    const socket = io();
+    let voted = false, accusedPlayerName = "";
+    let winnerModal = document.getElementById('winnerModal');
+    let winnerMessage = document.getElementById('winnerMessage');
+    let winnerExtra = document.getElementById('winnerExtra');
+    let startNextGameBtn = document.getElementById('startNextGameBtn');
+    let readyStatus = document.getElementById('readyStatus');
+    let localClickedReady = false;
+    const voteNowBanner = document.getElementById('voteNowBanner');
+
+    // Countdown overlay elements
+    const victoryOverlay = document.getElementById('victoryCountdownOverlay');
+    const victoryNumber = document.getElementById('victoryCountdownNumber');
+    const victoryTextSeconds = document.getElementById('victoryCountdownTextSeconds');
+    const victoryGoNowBtn = document.getElementById('victoryGoNowBtn');
+    let victoryCountdownTimer = null;
+    let victorySeconds = 15;
+
+    function drawStored(drawingOverride) {
+        let drawing = drawingOverride;
+        if (!drawing) {
+            drawing = JSON.parse(localStorage.getItem('currentDrawing') || "[]");
+        }
+        const wrapper = document.getElementById('drawingWrapper');
+        wrapper.innerHTML = '<canvas id="voteWhiteboard" width="800" height="480"></canvas>';
+        const canvas = document.getElementById('voteWhiteboard');
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawing.forEach(line => {
+            ctx.strokeStyle = line.color || "#fff";
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            if (line.points && line.points.length > 0) {
+                ctx.moveTo(line.points[0].x, line.points[0].y);
+                for (let i = 1; i < line.points.length; i++) {
+                    ctx.lineTo(line.points[i].x, line.points[i].y);
+                }
+                ctx.stroke();
+            }
+        });
+    }
+
+    drawStored();
+
+    // Show vote-now banner strongly during voting and hide after vote
+    function showVoteNowBanner() {
+        voteNowBanner.style.display = 'block';
+    }
+    function hideVoteNowBanner() {
+        voteNowBanner.style.display = 'none';
+    }
+
+    socket.on('startVoting', (data) => {
+        if (data.drawing) {
+            drawStored(data.drawing);
+            window.localStorage.setItem('currentDrawing', JSON.stringify(data.drawing));
+        } else {
+            drawStored();
+        }
+        showVotingButtons(data.players);
+        // show vote now banner to prompt players
+        showVoteNowBanner();
+    });
+
+    function showVotingButtons(players) {
+        const voteArea = document.getElementById('voteArea');
+        voteArea.innerHTML = '';
+        Object.values(players || {}).forEach(player => {
+            const btn = document.createElement('button');
+            btn.className = 'vote-button';
+            btn.style.background = player.color;
+            btn.style.color = '#000';
+            btn.style.margin = '0.4em';
+            btn.style.padding = '0.6em 1.3em';
+            btn.style.fontWeight = 'bold';
+            btn.innerHTML = `<span style="font-weight:bold">${player.name}</span>`;
+            btn.setAttribute('data-player-id', player.id || '');
+            btn.onclick = () => {
+                if (!voted) {
+                    Array.from(voteArea.querySelectorAll('.vote-button')).forEach(b => b.classList.remove('selected'));
+                    btn.classList.add('selected');
+                    socket.emit('submitVote', player.name);
+                    voted = true;
+                    voteArea.innerHTML = `<div style="color:#ffd; font-weight:800; padding:12px;">Vote submitted for <span style="color:${player.color}">${player.name}</span>. Waiting for others...</div>`;
+                    hideVoteNowBanner();
+                }
+            };
+            voteArea.appendChild(btn);
+        });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        drawStored();
+        socket.emit('joinGame', localStorage.getItem('playerName'));
+        socket.emit('requestVotingState');
+    });
+
+    socket.on('voteReceived', (data) => {
+        document.getElementById('votingStatus').innerHTML =
+            `Vote received from <span style="color:${data.voterName===data.votedPlayerName?'red':'#fff'}">${data.voterName}</span>.`;
+    });
+
+    function renderLeaderboard(playersObj, scoresObj, containerEl) {
+        const playersArr = Object.values(playersObj || {});
+        const filtered = playersArr.filter(p => scoresObj && (scoresObj[p.id] !== undefined));
+        filtered.sort((a,b) => (scoresObj[b.id]||0)-(scoresObj[a.id]||0));
+        const html = '<div class="leaderboard"><table><tr><th>Player</th><th>Score</th></tr>' +
+            filtered.map(p => `<tr><td><span style="color:${p.color};font-weight:bold">${p.name}</span></td><td style="text-align:center">${scoresObj[p.id]}</td></tr>`).join('') +
+            '</table></div>';
+        containerEl.innerHTML = html;
+    }
+
+    let votingPlayers = {}, votingFakeArtist = "";
+
+    socket.on('votingResults', (data) => {
+        votingPlayers = data.players || {};
+        votingFakeArtist = data.fakeArtist;
+        accusedPlayerName = data.accusedPlayerName || "?";
+        document.getElementById('voteArea').innerHTML = "";
+        document.getElementById('votingStatus').innerHTML =
+            `<div>
+              Vote Result: <b>${accusedPlayerName}</b> was accused.
+             </div>`;
+        // hide vote banner when results arrive
+        hideVoteNowBanner();
+    });
+
+    // winner modal handling (no auto-advance)
+    socket.on('winnerCountdown', (data) => {
+        winnerModal.style.display = "flex";
+        let msg = "";
+        if (data.winnerType === 'fake') {
+            msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">WINNER!</div>
+                   <div style="margin-top:8px"><b style="color:#fff">${data.fakeName}</b> (the fake artist) wins 2 points!</div>`;
+        } else if (data.winnerType === "artists") {
+            msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">WINNER!</div>
+                   <div style="margin-top:8px"><b style="color:#fff">Real Artists win 1 point</b></div>`;
+        } else {
+            msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">Round complete</div>`;
+        }
+        winnerMessage.innerHTML = msg;
+        renderLeaderboard(data.players, data.scores, winnerExtra);
+        localClickedReady = false;
+        startNextGameBtn.disabled = false;
+        startNextGameBtn.textContent = "I'm Ready — Start Next Game";
+        readyStatus.textContent = "0 / 0 players ready";
+        hideVoteNowBanner();
+    });
+
+    socket.on('waitForFakeGuess', (data) => {
+        winnerModal.style.display = "flex";
+        winnerMessage.innerHTML = `<div style="font-size:1.1rem;color:yellow;">${data.message || 'Waiting for fake to guess'}</div>`;
+        winnerExtra.innerHTML = `<div style="margin-top:0.5em;color:#ddd">${data.subMessage || ''}</div>`;
+        startNextGameBtn.disabled = true;
+        startNextGameBtn.textContent = "Waiting for fake guess...";
+        readyStatus.textContent = "";
+    });
+
+    socket.on('fakeGuessPrompt', (data) => {
+        document.getElementById('guessInput').value = "";
+        document.getElementById('guessCategory').textContent = data.secretCategory;
+        document.getElementById('guessModal').style.display = "flex";
+    });
+
+    document.getElementById('guessBtn').onclick = function() {
+        let guessText = document.getElementById('guessInput').value;
+        document.getElementById('guessModal').style.display = "none";
+        socket.emit('guessSubmitted', guessText);
+    };
+
+    socket.on('winnerSteal', function(data){
+        winnerModal.style.display = "flex";
+        let msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">WINNER!</div>
+                   <div style="margin-top:8px"><b style="color:#fff">${data.fakeName}</b> STEALS 2 POINTS!</div>`;
+        winnerMessage.innerHTML = msg;
+        renderLeaderboard(data.players, data.scores, winnerExtra);
+        localClickedReady = false;
+        startNextGameBtn.disabled = false;
+        startNextGameBtn.textContent = "I'm Ready — Start Next Game";
+        readyStatus.textContent = "0 / 0 players ready";
+    });
+
+    socket.on('victory', (data) => {
+        winnerModal.style.display = "flex";
+        let msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">CHAMPION!</div>
+            <div style="margin-top:8px"><b style="color:#fff">${data.champions.join(', ')}</b> is the winner!</div>`;
+        winnerMessage.innerHTML = msg;
+        const playersArr = Object.values(data.players || {});
+        const extraHtmlContainer = document.createElement('div');
+        extraHtmlContainer.innerHTML = '<div class="leaderboard"><table><tr><th>Player</th><th>Score</th></tr></table></div>';
+        if (data.scores && playersArr.length) {
+            const table = extraHtmlContainer.querySelector('table');
+            playersArr.sort((a,b) => ((data.scores[b.id]||0)-(data.scores[a.id]||0)));
+            playersArr.forEach(p => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td><span style="color:${p.color};font-weight:bold">${p.name}</span></td><td style="text-align:center">${data.scores[p.id]||0}</td>`;
+                table.appendChild(tr);
+            });
+        }
+        winnerExtra.innerHTML = extraHtmlContainer.innerHTML;
+        localClickedReady = false;
+        startNextGameBtn.disabled = false;
+        startNextGameBtn.textContent = "I'm Ready — Start Next Game";
+        readyStatus.textContent = "0 / 0 players ready";
+
+        // Start confetti + sound
+        if (window.startConfetti) startConfetti(9000, { audioSrc: '/assets/victory-sound.mp3', volume: 0.7 });
+
+        // Show overlay countdown
+        startVictoryCountdown();
+    });
+
+    function startVictoryCountdown() {
+      victorySeconds = 15;
+      victoryNumber.textContent = String(victorySeconds);
+      victoryTextSeconds.textContent = String(victorySeconds);
+      victoryOverlay.style.display = 'flex';
+      if (victoryCountdownTimer) {
+        clearInterval(victoryCountdownTimer);
+        victoryCountdownTimer = null;
+      }
+      victoryCountdownTimer = setInterval(() => {
+        victorySeconds--;
+        victoryNumber.textContent = String(victorySeconds);
+        victoryTextSeconds.textContent = String(victorySeconds);
+        if (victorySeconds <= 0) {
+          clearInterval(victoryCountdownTimer);
+          victoryCountdownTimer = null;
+          if (window.stopConfetti) stopConfetti();
+          window.location.href = '/champions';
+        }
+      }, 1000);
+    }
+
+    victoryGoNowBtn.addEventListener('click', () => {
+      if (victoryCountdownTimer) {
+        clearInterval(victoryCountdownTimer);
+        victoryCountdownTimer = null;
+      }
+      if (window.stopConfetti) stopConfetti();
+      window.location.href = '/champions';
+    });
+
+    startNextGameBtn.addEventListener('click', () => {
+        if (localClickedReady) return;
+        startNextGameBtn.disabled = true;
+        startNextGameBtn.textContent = "Ready (waiting for others...)";
+        socket.emit('startNextRoundReady');
+        localClickedReady = true;
+    });
+
+    socket.on('nextRoundReadyUpdate', (data) => {
+        const readyCount = data.readyCount || 0;
+        const totalNeeded = data.totalNeeded || 0;
+        readyStatus.textContent = `${readyCount} / ${totalNeeded} players ready`;
+        if (localClickedReady) {
+            startNextGameBtn.disabled = true;
+            startNextGameBtn.textContent = `Ready (${readyCount}/${totalNeeded})`;
+        } else {
+            startNextGameBtn.disabled = false;
+            startNextGameBtn.textContent = `I'm Ready — Start Next Game (${readyCount}/${totalNeeded})`;
+        }
+    });
+
+    socket.on('startNewGame', () => {
+        winnerModal.style.display = "none";
+        if (window.stopConfetti) stopConfetti();
+        window.location.href = '/game';
+    });
+
+    socket.on('startVoting', (data) => {
+        if (data.drawing) {
+            drawStored(data.drawing);
+            window.localStorage.setItem('currentDrawing', JSON.stringify(data.drawing));
+        } else drawStored();
+        showVotingButtons(data.players);
+        showVoteNowBanner();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+        socket.emit('joinGame', localStorage.getItem('playerName'));
+        socket.emit('requestVotingState');
+    });
+</script>
+</body>
+</html>
