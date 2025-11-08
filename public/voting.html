@@ -278,8 +278,13 @@
             msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">WINNER!</div>
                    <div style="margin-top:8px"><b style="color:#fff">${data.fakeName}</b> (the fake artist) wins 2 points!</div>`;
         } else if (data.winnerType === "artists") {
-            msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">WINNER!</div>
-                   <div style="margin-top:8px"><b style="color:#fff">Real Artists win 1 point</b></div>`;
+            // Find the fake artist's color
+            let fakeColor = '#ffd';
+            if (data.players && data.fakeName) {
+                const fakePlayer = Object.values(data.players).find(p => p.name === data.fakeName);
+                if (fakePlayer) fakeColor = fakePlayer.color || '#ffd';
+            }
+            msg = `<div style="font-size:1.2rem; font-weight:800; color:#fff">FAKE ARTIST <b style="color:${fakeColor}">${data.fakeName}</b> GUESSES WRONG! THE REAL ARTISTS WIN 1 POINT!</div>`;
         } else {
             msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">Round complete</div>`;
         }
@@ -315,8 +320,15 @@
 
     socket.on('winnerSteal', function(data){
         winnerModal.style.display = "flex";
-        let msg = `<div style="font-size:1.2rem; font-weight:800; color:#ffd">WINNER!</div>
-                   <div style="margin-top:8px"><b style="color:#fff">${data.fakeName}</b> STEALS 2 POINTS!</div>`;
+        
+        // Find the fake artist's color
+        let fakeColor = '#ffd';
+        if (data.players) {
+            const fakePlayer = Object.values(data.players).find(p => p.name === data.fakeName);
+            if (fakePlayer) fakeColor = fakePlayer.color || '#ffd';
+        }
+        
+        let msg = `<div style="font-size:1.2rem; font-weight:800; color:#fff">FAKE ARTIST <b style="color:${fakeColor}">${data.fakeName}</b> GUESSES CORRECTLY AND STEALS 2 POINTS!</div>`;
         winnerMessage.innerHTML = msg;
         renderLeaderboard(data.players, data.scores, winnerExtra);
         localClickedReady = false;

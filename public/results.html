@@ -162,8 +162,15 @@
     latestPlayers = data.players || latestPlayers;
     latestScores = data.scores || latestScores;
     let winnerLine = "";
+    
     if (data.winnerType === "artists" && Array.isArray(data.winnerNames)) {
-      winnerLine = `<div class="round-winners"><b>Winners:</b> <span style="font-weight:bold">${data.winnerNames.join(", ")}</span></div>`;
+      // Find the fake artist's color
+      let fakeColor = '#fff';
+      if (latestPlayers && data.fakeName) {
+        const fakePlayer = Object.values(latestPlayers).find(p => p.name === data.fakeName);
+        if (fakePlayer) fakeColor = fakePlayer.color || '#fff';
+      }
+      winnerLine = `<div class="round-winners">FAKE ARTIST <b style="color:${fakeColor}">${data.fakeName}</b> GUESSES WRONG! THE REAL ARTISTS WIN 1 POINT!</div>`;
     } else if (data.winnerType === "fake") {
       const fake = data.fakeName || data.fakeArtist || '(?)';
       winnerLine = `<div class="round-winners"><b>Fake Artist Wins:</b> <span style="font-weight:bold">${fake}</span></div>`;
@@ -180,7 +187,15 @@
     latestPlayers = data.players || latestPlayers;
     latestScores = data.scores || latestScores;
     const info = document.getElementById('resultsInfo');
-    info.innerHTML += `<div class="winner-result"><b>${data.fakeName}</b> STEALS THE VICTORY! 2 Points!</div>`;
+    
+    // Find the fake artist's color
+    let fakeColor = '#fff';
+    if (latestPlayers) {
+      const fakePlayer = Object.values(latestPlayers).find(p => p.name === data.fakeName);
+      if (fakePlayer) fakeColor = fakePlayer.color || '#fff';
+    }
+    
+    info.innerHTML += `<div class="winner-result">FAKE ARTIST <b style="color:${fakeColor}">${data.fakeName}</b> GUESSES CORRECTLY AND STEALS 2 POINTS!</div>`;
     renderScores(latestPlayers, latestScores);
     document.getElementById('nextRoundButton').classList.remove('hidden');
   });
